@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <string.h>
 
 #define DEBUG 1
 
@@ -47,6 +48,12 @@
 #define GOAL_CELL_WRONG 2
 #define ILLEGAL_MOVE 3
 #define BLOCK_IN_ROUTE 4
+
+#define EMPTY_CELL 0
+#define BLOCK_CELL 1
+#define INITIAL_CELL 2
+#define GOAL_CELL 3
+#define ROUTE_CELL 4
 
 typedef struct {
     int rows;
@@ -58,11 +65,13 @@ typedef struct {
     int y;
 } point_t;
 
+typedef int cell_t;
+
 typedef struct {
     dimensions_t dim;
     int num_blocks;
-    bool *inner;
-} obstacle_grid_t;
+    cell_t *inner;
+} grid_t;
 
 struct node;
 
@@ -81,15 +90,19 @@ typedef struct {
 } list_t;
 
 dimensions_t parse_dimensions();
-void print_results(obstacle_grid_t *grid,
+void print_results(grid_t *grid,
+                   point_t start, point_t end, list_t *path);
+void print_grid(grid_t *grid);
+void visualise_route(grid_t *grid,
                    point_t start, point_t end, list_t *path);
 
 bool parse_point(point_t *point);
 bool same_point(point_t a, point_t b);
 
-void obstacle_grid_alloc(obstacle_grid_t *grid, dimensions_t dim);
-bool *obstacle_grid_get(obstacle_grid_t *grid, point_t point);
-void obstacle_grid_free(obstacle_grid_t *grid);
+void grid_alloc(grid_t *grid, dimensions_t dim);
+cell_t *grid_get(grid_t *grid, point_t point);
+void grid_copy(grid_t *src, grid_t *dest);
+void grid_free(grid_t *grid);
 
 list_t* ll_alloc();
 bool ll_is_empty(list_t *list);
@@ -101,8 +114,8 @@ int
 main(int argc, char *argv[]) {
     dimensions_t dim = parse_dimensions();
 
-    obstacle_grid_t grid;
-    obstacle_grid_alloc(&grid, dim);
+    grid_t grid;
+    grid_alloc(&grid, dim);
 
     point_t start;
     parse_point(&start);
@@ -113,8 +126,7 @@ main(int argc, char *argv[]) {
 
     point_t point;
     while(parse_point(&point)) {
-        bool *is_block = obstacle_grid_get(&grid, point);
-        *is_block = true;
+        *grid_get(&grid, point) = BLOCK_CELL;
         grid.num_blocks++;
         scanf("\n");
     }
@@ -129,14 +141,19 @@ main(int argc, char *argv[]) {
         scanf("\n");
     }
 
+    /* stage 1 results */
+    printf("==STAGE 0=======================================\n");
     print_results(&grid, start, end, path);
 
+    printf("==STAGE 1=======================================\n");
+    visualise_route(&grid, start, end, path);
+
     ll_free(path);
-    obstacle_grid_free(&grid);
+    grid_free(&grid);
 	return 0;
 }
 
-int verify_route(obstacle_grid_t *grid,
+int verify_route(grid_t *grid,
                  point_t start, point_t end, list_t *path) {
     assert(!ll_is_empty(path));
     if(!same_point(path->head->coords, start)) {
@@ -158,8 +175,7 @@ int verify_route(obstacle_grid_t *grid,
                 step->next->coords.y, step->next->coords.x, difference
             );
         #endif
-
-        if(*obstacle_grid_get(grid, step->coords)) {
+        if(*grid_get(grid, step->coords) == BLOCK_CELL) {
             block_in_route = true;
         }
         if(difference > 1) {
@@ -176,14 +192,59 @@ int verify_route(obstacle_grid_t *grid,
     return ROUTE_VALID;
 }
 
-void print_results(obstacle_grid_t *grid,
+void visualise_route(grid_t *grid,
                    point_t start, point_t end, list_t *path) {
-    printf("==STAGE 0=======================================\n");
+    /* to visualise the grid, we first copy the path into the 2D array*/
+    grid_t filled_grid;
+    grid_copy(grid, &filled_grid);
+
+    node_t *step = path->head;
+    while(step != NULL) {
+        cell_t *cell = grid_get(&filled_grid, step->coords);
+        if(*cell != BLOCK_CELL) {
+            *cell = ROUTE_CELL;
+        }
+        step = step->next;
+    }
+
+    *grid_get(&filled_grid, start) = INITIAL_CELL;
+    *grid_get(&filled_grid, end) = GOAL_CELL;
+
+    print_grid(&filled_grid);
+
+    grid_free(&filled_grid);
+}
+
+void print_grid(grid_t *grid) {
+    int i, j;
+    for(j = -1; j < grid->dim.rows; j++) {
+        for(i = -1; i < grid->dim.cols; i++) {
+            if(i == -1 && j == -1) {
+                printf(" ");
+            } else if(i == -1) {
+                printf("%d", j);
+            } else if(j == -1) {
+                printf("%d", i);
+            } else {
+                point_t coords = { .x = i, .y = j };
+                cell_t cell = *grid_get(grid, coords);
+                if(cell == EMPTY_CELL) { printf(" "); }
+                else if(cell == BLOCK_CELL) { printf("#"); }
+                else if(cell == ROUTE_CELL) { printf("*"); }
+                else if(cell == INITIAL_CELL) { printf("I"); }
+                else if(cell == GOAL_CELL) { printf("G"); }
+            }
+        }
+        printf("\n");
+    }
+}
+
+void print_results(grid_t *grid,
+                   point_t start, point_t end, list_t *path) {
     printf("The grid has %d rows and %d columns.\n", grid->dim.rows, grid->dim.cols);
     printf("The grid has %d block(s).\n", grid->num_blocks);
     printf("The initial cell in the grid is [%d,%d].\n", start.y, start.x);
     printf("The goal cell in the grid is [%d,%d].\n", end.y, end.x);
-
     printf("The proposed route in the grid is:\n");
     node_t *step = path->head;
     int num_on_line = 0;
@@ -240,20 +301,33 @@ bool same_point(point_t a, point_t b) {
     return a.x == b.x && a.y == b.y;
 }
 
-void obstacle_grid_alloc(obstacle_grid_t *grid, dimensions_t dim) {
+/* allocates space for a grid and sets all cells to EMPTY_CELL */
+void grid_alloc(grid_t *grid, dimensions_t dim) {
     grid->dim = dim;
     grid->num_blocks = 0;
-    grid->inner = (bool *) malloc(sizeof(int) * dim.rows * dim.cols);
+    size_t bytes = sizeof(cell_t) * dim.rows * dim.cols;
+    grid->inner = (cell_t *) malloc(bytes);
     assert(grid->inner != NULL);
+    /* 'zeroes' the memory with empty cells */
+    memset(grid->inner, EMPTY_CELL, bytes);
 }
 
-bool *obstacle_grid_get(obstacle_grid_t *grid, point_t point) {
+cell_t *grid_get(grid_t *grid, point_t point) {
     assert(grid->inner != NULL);
     assert(point.x < grid->dim.cols && point.y < grid->dim.rows);
     return &grid->inner[point.y * grid->dim.rows + point.x];
 }
 
-void obstacle_grid_free(obstacle_grid_t *grid) {
+/* NOTE: if 'dest' was already an allocated grid, it must be freed before
+   first otherwise memory will be leaked */
+void grid_copy(grid_t *src, grid_t *dest) {
+    grid_alloc(dest, src->dim);
+    dest->num_blocks = src->num_blocks;
+    size_t bytes = sizeof(cell_t) * src->dim.rows * src->dim.cols;
+    memcpy(dest->inner, src->inner, bytes);
+}
+
+void grid_free(grid_t *grid) {
     free(grid->inner);
     grid->inner = NULL;
 }
