@@ -6,5 +6,5 @@ if [ "$2" == "debug" ]; then
     ./ass2 < test${1}.txt 2>&1 >/dev/null | less
 else
     ./ass2 < test${1}.txt > ass2-test${1}.txt
-    nvim -d ass2-test${1}.txt test${1}-out-mac.txt
+    nvim -c 'windo set nofoldenable' -d ass2-test${1}.txt test${1}-out-mac.txt
 fi
