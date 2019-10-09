@@ -127,7 +127,6 @@ vec_item_t *vec_get(vec_t *vec, size_t idx);
 void print_vec(vec_t *vec);
 void vec_free(vec_t *vec);
 
-
 typedef struct {
     point_t start;
     point_t end;
@@ -145,7 +144,7 @@ void iter_repair_route(grid_t *grid, grid_t* scratch_grid, path_t* path, int *st
 bool repair_route(grid_t *grid, path_t *path);
 bool try_repair_step(grid_t *grid, point_t point, int distance, vec_t *repair, point_t *repair_end);
 void try_backtrack(grid_t *grid, point_t *point, int *min_distance, point_t try_point);
-void draw_path(grid_t *grid, path_t *path);
+void draw_path(grid_t *grid, point_t start, point_t end, node_t *start_path);
 
 bool parse_point(point_t *point);
 bool same_point(point_t a, point_t b);
@@ -327,19 +326,9 @@ bool repair_route(grid_t *grid, path_t *path) {
     }
     node_t *tail_path_start = step;
 
-    /* our repair can reach any part of the path *after* the problem cells,
-       so we draw those cells onto the grid */
-    /* this method of grabbing part of a doubly-linked list is slightly dodgy,
-       as the head's `prev` pointer is not NULL. However
-       since I know my `draw_path` function only walks forwards through the
-       list, this is okay. */
-    list_t tail_path_steps = { .head = tail_path_start, .foot = path->steps.foot };
-    path_t tail_path = {
-        .start = path->start,
-        .end = path->end,
-        .steps = tail_path_steps
-    };
-    draw_path(grid, &tail_path);
+    /* our repair should find path segments *after* the broken region
+       so we draw only those path segments onto the grid */
+    draw_path(grid, path->start, path->end, tail_path_start);
     /* override the starting cell to be `0` */
     *grid_get(grid, repair_start.coords) = SEARCH_CELL_MIN;
 
@@ -435,7 +424,7 @@ bool try_repair_step(grid_t *grid, point_t point, int distance, vec_t *repair, p
         vec_item_t next = { .distance = distance, .coords = point };
         *grid_get(grid, point) = SEARCH_CELL_MIN + next.distance;
         vec_push(repair, next);
-    } else if(*cell == ROUTE_CELL || *cell == GOAL_CELL) {
+    } else if(*cell == ROUTE_CELL || *cell == INITIAL_CELL || *cell == GOAL_CELL) {
         *repair_end = point;
         return true;
     }
@@ -453,9 +442,9 @@ void try_backtrack(grid_t *grid, point_t *point, int *min_distance, point_t try_
     }
 }
 
-void draw_path(grid_t *grid, path_t *path) {
+void draw_path(grid_t *grid, point_t start, point_t end, node_t *start_path) {
     /* draw the path into the 2D array*/
-    node_t *step = path->steps.head;
+    node_t *step = start_path;
     /* if a visited cell is also the initial cell, goal cell, or contains a
        block, then `I`, `G`, or `#`, respectively, should be printed, not `*` */
     while(step != NULL) {
@@ -466,15 +455,13 @@ void draw_path(grid_t *grid, path_t *path) {
         step = step->next;
     }
 
-    cell_t *initial = grid_get(grid, path->start);
-    cell_t *goal = grid_get(grid, path->end);
-    if(*initial != BLOCK_CELL) { *initial = INITIAL_CELL; }
-    if(*goal != BLOCK_CELL) { *goal = GOAL_CELL; }
+    *grid_get(grid, start) = INITIAL_CELL;
+    *grid_get(grid, end) = GOAL_CELL;
 }
 
 void print_path_on_grid(grid_t *grid, grid_t *scratch_grid, path_t *path) {
     grid_copy(grid, scratch_grid);
-    draw_path(scratch_grid, path);
+    draw_path(scratch_grid, path->start, path->end, path->steps.head);
     print_grid(scratch_grid);
 }
 
