@@ -41,7 +41,7 @@
 #include <assert.h>
 #include <string.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define VEC_INITIAL_CAPACITY 2
 
 #define ROUTE_VALID 5
@@ -174,7 +174,7 @@ main(int argc, char *argv[]) {
         scanf(" ");
     }
 
-    scanf("$\n");
+    scanf("$ ");
 
     path_t path = {
         .start = start,
@@ -201,8 +201,9 @@ main(int argc, char *argv[]) {
     bool first = true;
     /* consume any whitespace */
     scanf(" ");
-    while(!feof(stdin)) {
-        scanf("$ ");
+    int bytes_read;
+    scanf("$ %n", &bytes_read);
+    while(bytes_read > 0) {
         if(first) {
             printf("==STAGE 2=======================================\n");
             first = false;
@@ -220,9 +221,14 @@ main(int argc, char *argv[]) {
         /* printf("Got char: '%d'\n", getchar()); */
         status = verify_route(&grid, &path);
         iter_repair_route(&grid, &scratch_grid, &path, &status);
+        scanf("$ %n", &bytes_read);
     }
 
     printf("================================================\n");
+
+    if(!feof(stdin)) {
+        fprintf(stderr, "Fatal error: malformed input file.\n");
+    }
 
     ll_free(&path.steps);
     grid_free(&grid);
@@ -311,12 +317,11 @@ bool repair_route(grid_t *grid, path_t *path) {
     #if DEBUG
         fprintf(stderr, "Starting repair at: [%d, %d]", repair_start.coords.y, repair_start.coords.x);
     #endif
-    *grid_get(grid, repair_start.coords) = SEARCH_CELL_MIN;
 
     /* skip the starting cell */
     step = step->next;
     /* remove the problem cells */
-    while(step != NULL && *grid_get(grid, step->coords) == BLOCK_CELL) {
+    while(step != NULL && step->next != NULL && *grid_get(grid, step->coords) == BLOCK_CELL) {
         step = step->next;
         ll_remove(&path->steps, step->prev);
     }
@@ -335,6 +340,8 @@ bool repair_route(grid_t *grid, path_t *path) {
         .steps = tail_path_steps
     };
     draw_path(grid, &tail_path);
+    /* override the starting cell to be `0` */
+    *grid_get(grid, repair_start.coords) = SEARCH_CELL_MIN;
 
     #if DEBUG
         fprintf(stderr, ", ending somewhere after: [%d, %d]\n", tail_path_start->coords.y, tail_path_start->coords.x);
@@ -368,11 +375,12 @@ bool repair_route(grid_t *grid, path_t *path) {
     if(i >= repair.len) {
         return false;
     }
+    vec_free(&repair);
 
     #if DEBUG
         fprintf(stderr, "Found route in %ld steps, ended at: [%d, %d]\n", i, repair_end.y, repair_end.x);
+        print_grid(grid);
     #endif
-    vec_free(&repair);
 
     /* remove more parts of the old path, if the repair took us further than anticipated */
     while(tail_path_start->next != NULL && !same_point(repair_end, tail_path_start->coords)) {
@@ -381,6 +389,11 @@ bool repair_route(grid_t *grid, path_t *path) {
     }
 
     point_t tail_point = repair_end;
+
+    #if DEBUG
+        fprintf(stderr, "Backtracking towards: [%d, %d]\n", repair_start.coords.y, repair_start.coords.x);
+    #endif
+    assert(*grid_get(grid, repair_start.coords) == SEARCH_CELL_MIN);
 
     if(same_point(tail_path_start->coords, repair_start.coords)) {
         ll_remove(&path->steps, tail_path_start);
@@ -443,6 +456,8 @@ void try_backtrack(grid_t *grid, point_t *point, int *min_distance, point_t try_
 void draw_path(grid_t *grid, path_t *path) {
     /* draw the path into the 2D array*/
     node_t *step = path->steps.head;
+    /* if a visited cell is also the initial cell, goal cell, or contains a
+       block, then `I`, `G`, or `#`, respectively, should be printed, not `*` */
     while(step != NULL) {
         cell_t *cell = grid_get(grid, step->coords);
         if(*cell != BLOCK_CELL) {
@@ -451,8 +466,10 @@ void draw_path(grid_t *grid, path_t *path) {
         step = step->next;
     }
 
-    *grid_get(grid, path->start) = INITIAL_CELL;
-    *grid_get(grid, path->end) = GOAL_CELL;
+    cell_t *initial = grid_get(grid, path->start);
+    cell_t *goal = grid_get(grid, path->end);
+    if(*initial != BLOCK_CELL) { *initial = INITIAL_CELL; }
+    if(*goal != BLOCK_CELL) { *goal = GOAL_CELL; }
 }
 
 void print_path_on_grid(grid_t *grid, grid_t *scratch_grid, path_t *path) {
@@ -535,7 +552,7 @@ dimensions_t parse_dimensions() {
     dimensions_t dim;
     int res = scanf("%dx%d\n", &dim.rows, &dim.cols);
     if(res != 2) {
-        fprintf(stderr, "Failed to parse grid dimensions from stdin.\n");
+        fprintf(stderr, "Fatal error: failed to parse grid dimensions from stdin.\n");
         exit(EXIT_FAILURE);
     }
     return dim;
