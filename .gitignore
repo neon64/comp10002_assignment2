@@ -1,2 +1,4 @@
 .vscode/
 /ass2
+.idea/
+cmake-build-debug/
