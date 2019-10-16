@@ -41,7 +41,7 @@
 #include <assert.h>
 #include <string.h>
 
-#define DEBUG 0
+#define DEBUG 1
 #define VEC_INITIAL_CAPACITY 2
 #define DSEPARATOR "================================================\n"
 #define SSEPARATOR "------------------------------------------------\n"
@@ -104,8 +104,8 @@ typedef struct {
 
 void ll_init(list_t *list);
 bool ll_is_empty(list_t *list);
-node_t *ll_insert_before(list_t* list, node_t *node, list_item_t data);
-node_t *ll_insert_after(list_t* list, node_t *node, list_item_t data);
+node_t *ll_insert_before(list_t* list, node_t *before, list_item_t coords);
+node_t *ll_insert_after(list_t* list, node_t *after, list_item_t coords);
 void ll_remove(list_t *list, node_t *node);
 void ll_free(list_t *list);
 
@@ -125,7 +125,6 @@ typedef struct {
 void vec_init(vec_t *vec);
 void vec_push(vec_t *vec, vec_item_t item);
 vec_item_t *vec_get(vec_t *vec, size_t idx);
-void print_vec(vec_t *vec);
 void vec_free(vec_t *vec);
 
 typedef struct {
@@ -142,7 +141,6 @@ void print_grid(grid_t *grid);
 void print_path_on_grid(grid_t *grid, grid_t *scratch_grid, path_t *path);
 int verify_route(grid_t *grid, path_t *path);
 void print_point(point_t point);
-void stage_one(grid_t *grid, grid_t *scratch_grid, path_t *path, int *status);
 void iter_repair_route(grid_t *grid, grid_t* scratch_grid, path_t* path, int *status, bool iter);
 bool repair_route(grid_t *grid, path_t *path);
 bool try_repair_step(grid_t *grid, point_t point, int distance, vec_t *repair, point_t *repair_end);
@@ -213,7 +211,6 @@ main(int argc, char *argv[]) {
 
         scanf(" ");
 
-        point_t point;
         grid_clear(&grid);
         while(parse_point(&point)) {
             *grid_get(&grid, point) = BLOCK_CELL;
@@ -355,7 +352,7 @@ bool repair_route(grid_t *grid, path_t *path) {
     vec_push(&repair, search_start);
 
     point_t repair_end;
-    int dist;
+    int dist = 0;
     size_t i = 0;
     while(i < repair.len) {
         vec_item_t *current = vec_get(&repair, i);
@@ -365,10 +362,14 @@ bool repair_route(grid_t *grid, path_t *path) {
         point_t left = { .x = p.x -1, .y = p.y };
         point_t right = { .x = p.x + 1, .y = p.y };
         dist = current->distance + 1;
-        if((above.y >= 0 && try_repair_step(grid, above, dist, &repair, &repair_end)) ||
-           (below.y < grid->dim.rows && try_repair_step(grid, below, dist, &repair, &repair_end)) ||
-           (left.x >= 0 && try_repair_step(grid, left, dist, &repair, &repair_end)) ||
-           (right.x < grid->dim.cols && try_repair_step(grid, right, dist, &repair, &repair_end))
+        if((above.y >= 0 && try_repair_step(grid, above, dist, &repair,
+                &repair_end)) ||
+           (below.y < grid->dim.rows && try_repair_step(grid, below, dist,
+                   &repair, &repair_end)) ||
+           (left.x >= 0 && try_repair_step(grid, left, dist, &repair,  
+                   &repair_end)) ||
+           (right.x < grid->dim.cols && try_repair_step(grid, right, dist,
+                   &repair, &repair_end))
           ) {
             break;
         }
@@ -398,10 +399,6 @@ bool repair_route(grid_t *grid, path_t *path) {
     point_t tail_point = repair_end;
 
     assert(*grid_get(grid, repair_start->coords) == SEARCH_CELL_MIN);
-
-    /* if(same_point(tail_path_start->coords, repair_start->coords)) {
-        ll_remove(&path->steps, tail_path_start);
-    } */
 
     /* gradually add cells until the start of the tail path
        joins up with the start of the repair */
@@ -732,14 +729,6 @@ void vec_push(vec_t *vec, vec_item_t item) {
 vec_item_t *vec_get(vec_t *vec, size_t idx) {
     assert(idx < vec->len);
     return &vec->storage[idx];
-}
-
-void print_vec(vec_t *vec) {
-    int i;
-    for(i = 0; i < vec->len; i++) {
-        print_point(vec->storage[i].coords);
-        printf(": #%d\n", vec->storage[i].distance);
-    }
 }
 
 void vec_free(vec_t *vec) {
