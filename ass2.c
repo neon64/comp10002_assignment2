@@ -152,7 +152,7 @@ void iter_repair_route(grid_t *grid, grid_t *scratch_grid, path_t *path,
 bool repair_route(grid_t *grid, path_t *path);
 bool try_repair_step(grid_t *grid, point_t point, int distance,
                      vec_deque_t *repair, point_t *repair_end);
-void try_backtrack(grid_t *grid, point_t *point, int *min_distance,
+bool try_backtrack(grid_t *grid, point_t *point, int *min_distance,
                    point_t try_point);
 void draw_path(grid_t *grid, node_t *start_path);
 
@@ -367,6 +367,7 @@ bool repair_route(grid_t *grid, path_t *path) {
         point_t left = {.x = p.x - 1, .y = p.y};
         point_t right = {.x = p.x + 1, .y = p.y};
         dist = current.distance + 1;
+        /* search with priority above, below, left, right */
         if ((above.y >= 0 &&
              try_repair_step(grid, above, dist, &repair, &repair_end)) ||
             (below.y < grid->dim.rows &&
@@ -425,23 +426,18 @@ bool repair_route(grid_t *grid, path_t *path) {
         point_t left = {.x = tail_point.x - 1, .y = tail_point.y};
         point_t right = {.x = tail_point.x + 1, .y = tail_point.y};
 
-        int old_dist = dist;
-        if (right.x < grid->dim.cols) {
-            try_backtrack(grid, &tail_point, &dist, right);
-        }
-        if (left.x >= 0) {
-            try_backtrack(grid, &tail_point, &dist, left);
-        }
-        if (below.y < grid->dim.rows) {
-            try_backtrack(grid, &tail_point, &dist, below);
-        }
-        if (above.y >= 0) {
-            try_backtrack(grid, &tail_point, &dist, above);
-        }
+        /* backtrack with priority above, below, left, right */
+        bool backtracked =
+            (above.y >= 0 && try_backtrack(grid, &tail_point, &dist, above)) ||
+            (below.y < grid->dim.rows &&
+             try_backtrack(grid, &tail_point, &dist, below)) ||
+            (left.x >= 0 && try_backtrack(grid, &tail_point, &dist, left)) ||
+            (right.x < grid->dim.cols &&
+             try_backtrack(grid, &tail_point, &dist, right));
 
         /* sanity check that we're getting closer to start.
            otherwise this loop will not terminate. */
-        if (dist >= old_dist) {
+        if (!backtracked) {
             fprintf(stderr, "Backtracking operation will not terminate.\n");
             exit(EXIT_FAILURE);
         }
@@ -464,7 +460,7 @@ bool try_repair_step(grid_t *grid, point_t point, int distance,
     return false;
 }
 
-void try_backtrack(grid_t *grid, point_t *point, int *min_distance,
+bool try_backtrack(grid_t *grid, point_t *point, int *min_distance,
                    point_t try_point) {
     int cell = *grid_get(grid, try_point);
     if (cell >= SEARCH_CELL_MIN) {
@@ -472,8 +468,10 @@ void try_backtrack(grid_t *grid, point_t *point, int *min_distance,
         if (distance <= *min_distance) {
             *point = try_point;
             *min_distance = distance;
+            return true;
         }
     }
+    return false;
 }
 
 void draw_path(grid_t *grid, node_t *start_path) {
