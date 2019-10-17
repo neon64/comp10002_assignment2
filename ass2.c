@@ -84,7 +84,7 @@ cell_t *grid_get(grid_t *grid, point_t point);
 void grid_copy(grid_t *src, grid_t *dest);
 void grid_free(grid_t *grid);
 
-/* linked-list */
+/* a doubly-linked list */
 
 struct node;
 
@@ -109,7 +109,11 @@ node_t *ll_insert_after(list_t *list, node_t *after, list_item_t coords);
 void ll_remove(list_t *list, node_t *node);
 void ll_free(list_t *list);
 
-/* vector, used as a queue for path-repair */
+/*
+    A growable ring buffer
+    inspired by VecDeque in Rust.
+    https://doc.rust-lang.org/std/collections/struct.VecDeque.html
+*/
 
 typedef struct {
     point_t coords;
@@ -118,14 +122,17 @@ typedef struct {
 
 typedef struct {
     vec_item_t *storage;
-    size_t len;
+    /* where data should be written */
+    size_t head;
+    /* first data which can be read */
+    size_t tail;
     size_t capacity;
-} vec_t;
+} vec_deque_t;
 
-void vec_init(vec_t *vec);
-void vec_push(vec_t *vec, vec_item_t item);
-vec_item_t *vec_get(vec_t *vec, size_t idx);
-void vec_free(vec_t *vec);
+void vec_init(vec_deque_t *vec);
+void vec_push_back(vec_deque_t *vec, vec_item_t item);
+bool vec_pop_front(vec_deque_t *vec, vec_item_t *item);
+void vec_free(vec_deque_t *vec);
 
 typedef struct {
     point_t start;
@@ -143,8 +150,8 @@ void print_point(point_t point);
 void iter_repair_route(grid_t *grid, grid_t *scratch_grid, path_t *path,
                        int *status, bool iter);
 bool repair_route(grid_t *grid, path_t *path);
-bool try_repair_step(grid_t *grid, point_t point, int distance, vec_t *repair,
-                     point_t *repair_end);
+bool try_repair_step(grid_t *grid, point_t point, int distance,
+                     vec_deque_t *repair, point_t *repair_end);
 void try_backtrack(grid_t *grid, point_t *point, int *min_distance,
                    point_t try_point);
 void draw_path(grid_t *grid, node_t *start_path);
@@ -344,22 +351,22 @@ bool repair_route(grid_t *grid, path_t *path) {
             tail_path_start->coords.y, tail_path_start->coords.x);
 #endif
 
-    vec_t repair;
+    vec_deque_t repair;
     vec_init(&repair);
     vec_item_t search_start = {.coords = repair_start->coords, .distance = 0};
-    vec_push(&repair, search_start);
+    vec_push_back(&repair, search_start);
 
     point_t repair_end;
+    bool found = false;
     int dist = 0;
-    size_t i = 0;
-    while (i < repair.len) {
-        vec_item_t *current = vec_get(&repair, i);
-        point_t p = current->coords;
+    vec_item_t current;
+    while (!found && vec_pop_front(&repair, &current)) {
+        point_t p = current.coords;
         point_t above = {.x = p.x, .y = p.y - 1};
         point_t below = {.x = p.x, .y = p.y + 1};
         point_t left = {.x = p.x - 1, .y = p.y};
         point_t right = {.x = p.x + 1, .y = p.y};
-        dist = current->distance + 1;
+        dist = current.distance + 1;
         if ((above.y >= 0 &&
              try_repair_step(grid, above, dist, &repair, &repair_end)) ||
             (below.y < grid->dim.rows &&
@@ -368,12 +375,11 @@ bool repair_route(grid_t *grid, path_t *path) {
              try_repair_step(grid, left, dist, &repair, &repair_end)) ||
             (right.x < grid->dim.cols &&
              try_repair_step(grid, right, dist, &repair, &repair_end))) {
-            break;
+            found = true;
         }
-        i++;
     }
 
-    if (i >= repair.len) {
+    if (!found) {
         return false;
     }
     vec_free(&repair);
@@ -444,13 +450,13 @@ bool repair_route(grid_t *grid, path_t *path) {
     return true;
 }
 
-bool try_repair_step(grid_t *grid, point_t point, int distance, vec_t *repair,
-                     point_t *repair_end) {
+bool try_repair_step(grid_t *grid, point_t point, int distance,
+                     vec_deque_t *repair, point_t *repair_end) {
     int *cell = grid_get(grid, point);
     if (*cell == EMPTY_CELL) {
         vec_item_t next = {.distance = distance, .coords = point};
         *grid_get(grid, point) = SEARCH_CELL_MIN + next.distance;
-        vec_push(repair, next);
+        vec_push_back(repair, next);
     } else if (*cell == ROUTE_CELL) {
         *repair_end = point;
         return true;
@@ -716,30 +722,58 @@ void ll_free(list_t *list) {
     }
 }
 
-void vec_init(vec_t *vec) {
+void vec_init(vec_deque_t *vec) {
     vec->storage =
         (vec_item_t *)malloc(sizeof(vec_item_t) * VEC_INITIAL_CAPACITY);
     assert(vec->storage != NULL);
-    vec->len = 0;
-    vec->capacity = 2;
+    vec->head = 0;
+    vec->tail = 0;
+    vec->capacity = VEC_INITIAL_CAPACITY;
 }
 
-void vec_push(vec_t *vec, vec_item_t item) {
-    if (vec->len == vec->capacity) {
-        /* reallocate */
+void vec_push_back(vec_deque_t *vec, vec_item_t item) {
+    vec->storage[vec->head] = item;
+    vec->head = (vec->head + 1) % vec->capacity;
+
+    /* buffer is full */
+    if (vec->head == vec->tail) {
+        /* now need to reallocate */
+        size_t old_cap = vec->capacity;
         vec->capacity *= 2;
         vec->storage = (vec_item_t *)realloc(vec->storage, sizeof(vec_item_t) *
                                                                vec->capacity);
+        /* if the head was at the end of the buffer, no need to move memory */
+        if (vec->head == 0) {
+            vec->head = old_cap;
+            /* noop */
+        } else if (vec->head < old_cap - vec->tail) {
+            /* if the head was smaller than the tail, move it */
+            memcpy(vec->storage + old_cap, vec->storage,
+                   sizeof(vec_item_t) * vec->head);
+            vec->head += old_cap;
+        } else {
+            /* if the tail was smaller than the head, move it to the end */
+            size_t tail_size = old_cap - vec->tail;
+            size_t next_tail = vec->capacity - tail_size;
+            memcpy(vec->storage + next_tail, vec->storage + vec->tail,
+                   sizeof(vec_item_t) * tail_size);
+            vec->tail = next_tail;
+        }
     }
-    vec->storage[vec->len++] = item;
 }
 
-vec_item_t *vec_get(vec_t *vec, size_t idx) {
-    assert(idx < vec->len);
-    return &vec->storage[idx];
+bool vec_pop_front(vec_deque_t *vec, vec_item_t *item) {
+    /* empty queue */
+    if (vec->head == vec->tail) {
+        return false;
+    }
+
+    *item = vec->storage[vec->tail];
+    vec->tail = (vec->tail + 1) % vec->capacity;
+    return true;
 }
 
-void vec_free(vec_t *vec) {
+void vec_free(vec_deque_t *vec) {
     free(vec->storage);
     vec->storage = NULL;
 }
