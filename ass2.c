@@ -44,6 +44,9 @@
 #define DEBUG 0
 #define VEC_INITIAL_CAPACITY 2
 #define DSEPARATOR "================================================\n"
+#define STAGE_ZERO "==STAGE 0=======================================\n"
+#define STAGE_ONE "==STAGE 1=======================================\n"
+#define STAGE_TWO "==STAGE 2=======================================\n"
 #define SSEPARATOR "------------------------------------------------\n"
 
 #define ROUTE_VALID 5
@@ -74,13 +77,13 @@ typedef struct {
 typedef int cell_t;
 typedef struct {
     dimensions_t dim;
-    int num_blocks;
     cell_t *inner;
 } grid_t;
 
 void grid_init(grid_t *grid, dimensions_t dim);
 void grid_clear(grid_t *grid);
-cell_t *grid_get(grid_t *grid, point_t point);
+cell_t grid_get(grid_t *grid, point_t point);
+void grid_set(grid_t *grid, point_t point, cell_t cell);
 void grid_copy(grid_t *src, grid_t *dest);
 void grid_free(grid_t *grid);
 
@@ -91,6 +94,12 @@ struct node;
 typedef struct node node_t;
 typedef point_t list_item_t;
 
+/* I chose to avoid the use of void* data types here for two reasons:
+   (1) I dislike how void* strips all type information, so you have to hope
+       the data is interpreted as the correct type. (compiler won't complain)
+   (2) I want to avoid as much pointer indirection as possible, and using
+       a void* means that the list_item_t must be allocated seperately to the
+       node_t. */
 struct node {
     list_item_t coords;
     node_t *next;
@@ -140,13 +149,13 @@ typedef struct {
     list_t steps;
 } path_t;
 
-dimensions_t parse_dimensions();
 void print_results(grid_t *grid, path_t *path, int status, bool initial);
 void print_list(list_t *list);
 void print_grid(grid_t *grid);
 void print_path_on_grid(grid_t *grid, grid_t *scratch_grid, path_t *path);
-int verify_route(grid_t *grid, path_t *path);
 void print_point(point_t point);
+
+int verify_route(grid_t *grid, path_t *path);
 void iter_repair_route(grid_t *grid, grid_t *scratch_grid, path_t *path,
                        int *status, bool iter);
 bool repair_route(grid_t *grid, path_t *path);
@@ -155,15 +164,64 @@ bool try_repair_step(grid_t *grid, point_t point, int distance,
 bool try_backtrack(grid_t *grid, point_t *point, int *min_distance,
                    point_t try_point);
 void draw_path(grid_t *grid, node_t *start_path);
-
 bool parse_point(point_t *point);
+void parse_initial(grid_t *grid, path_t *path);
+dimensions_t parse_dimensions();
 bool same_point(point_t a, point_t b);
 
 int main(int argc, char *argv[]) {
-    dimensions_t dim = parse_dimensions();
-
     grid_t grid;
-    grid_init(&grid, dim);
+    path_t path;
+
+    parse_initial(&grid, &path);
+
+    int status = verify_route(&grid, &path);
+    grid_t scratch_grid;
+    grid_init(&scratch_grid, grid.dim);
+
+    printf(STAGE_ZERO);
+    print_results(&grid, &path, status, true);
+
+    /* stage 1 results */
+    printf(STAGE_ONE);
+    iter_repair_route(&grid, &scratch_grid, &path, &status, false);
+
+    bool first = true;
+    /* consume any whitespace */
+    scanf(" ");
+    while ((status == ROUTE_VALID || status == BLOCK_IN_ROUTE) &&
+           getchar() == '$') {
+        if (first) {
+            printf(STAGE_TWO);
+            first = false;
+        } else {
+            printf(DSEPARATOR);
+        }
+
+        scanf(" ");
+
+        grid_clear(&grid);
+        point_t point;
+        while (parse_point(&point)) {
+            grid_set(&grid, point, BLOCK_CELL);
+            scanf(" ");
+        }
+        status = verify_route(&grid, &path);
+        iter_repair_route(&grid, &scratch_grid, &path, &status, true);
+        scanf(" ");
+    }
+
+    printf(DSEPARATOR);
+
+    ll_free(&path.steps);
+    grid_free(&grid);
+    grid_free(&scratch_grid);
+    return 0;
+}
+
+void parse_initial(grid_t *grid, path_t *path) {
+    dimensions_t dim = parse_dimensions();
+    grid_init(grid, dim);
 
     point_t start;
     int res = parse_point(&start);
@@ -176,105 +234,51 @@ int main(int argc, char *argv[]) {
 
     point_t point;
     while (parse_point(&point)) {
-        *grid_get(&grid, point) = BLOCK_CELL;
-        grid.num_blocks++;
+        grid_set(grid, point, BLOCK_CELL);
         scanf(" ");
     }
 
     scanf("$ ");
 
-    path_t path = {.start = start, .end = end};
-    ll_init(&path.steps);
+    path->start = start;
+    path->end = end;
+    ll_init(&path->steps);
 
     while (parse_point(&point)) {
-        ll_insert_after(&path.steps, path.steps.foot, point);
+        ll_insert_after(&path->steps, path->steps.foot, point);
         scanf("-> "); /* allows for whitespace e.g.: newlines after an arrow */
     }
-
-    int status = verify_route(&grid, &path);
-    grid_t scratch_grid;
-    grid_init(&scratch_grid, grid.dim);
-
-    /* stage 1 results */
-    printf("==STAGE 0=======================================\n");
-    print_results(&grid, &path, status, true);
-
-    printf("==STAGE 1=======================================\n");
-    iter_repair_route(&grid, &scratch_grid, &path, &status, false);
-
-    bool first = true;
-    /* consume any whitespace */
-    scanf(" ");
-    while ((status == ROUTE_VALID || status == BLOCK_IN_ROUTE) &&
-           getchar() == '$') {
-        if (first) {
-            printf("==STAGE 2=======================================\n");
-            first = false;
-        } else {
-            printf(DSEPARATOR);
-        }
-
-        scanf(" ");
-
-        grid_clear(&grid);
-        while (parse_point(&point)) {
-            *grid_get(&grid, point) = BLOCK_CELL;
-            grid.num_blocks++;
-            scanf(" ");
-        }
-        status = verify_route(&grid, &path);
-        iter_repair_route(&grid, &scratch_grid, &path, &status, true);
-        scanf(" ");
-    }
-
-    printf(DSEPARATOR);
-
-#if DEBUG
-    if ((status == ROUTE_VALID || status == BLOCK_IN_ROUTE) && !feof(stdin)) {
-        fprintf(stderr, "Warning: malformed input file.\n");
-    }
-#endif
-
-    ll_free(&path.steps);
-    grid_free(&grid);
-    grid_free(&scratch_grid);
-    return 0;
 }
 
 void iter_repair_route(grid_t *grid, grid_t *scratch_grid, path_t *path,
                        int *status, bool iter) {
     print_path_on_grid(grid, scratch_grid, path);
 
-    /* if the grid wasn't broken, only print the grid with the valid route. */
-    if (*status != BLOCK_IN_ROUTE) {
-        return;
-    }
-
-    printf(SSEPARATOR);
-
+    /* only iteratively repair if there were blocks in the way to start with */
     while (*status == BLOCK_IN_ROUTE) {
         grid_copy(grid, scratch_grid);
         bool repaired = repair_route(scratch_grid, path);
 
         if (!repaired) {
-            break;
+            /* if the grid was broken and could not be repaired */
+            printf(SSEPARATOR);
+            print_path_on_grid(grid, scratch_grid, path);
+            printf(SSEPARATOR);
+            printf("The route cannot be repaired!\n");
+            return;
         }
 
         *status = verify_route(grid, path);
         if (*status == ROUTE_VALID || !iter) {
             /* if the route was broken and successfully repaired,
                or one repair was successful during stage one */
+            printf(SSEPARATOR);
             print_path_on_grid(grid, scratch_grid, path);
             printf(SSEPARATOR);
             print_results(grid, path, *status, false);
             return;
         }
     }
-
-    /* if the grid was broken and could not be repaired */
-    print_path_on_grid(grid, scratch_grid, path);
-    printf(SSEPARATOR);
-    printf("The route cannot be repaired!\n");
 }
 
 int verify_route(grid_t *grid, path_t *path) {
@@ -295,7 +299,7 @@ int verify_route(grid_t *grid, path_t *path) {
             step->coords.y < 0 || step->coords.y >= grid->dim.rows) {
             return ILLEGAL_MOVE;
         }
-        if (*grid_get(grid, step->coords) == BLOCK_CELL) {
+        if (grid_get(grid, step->coords) == BLOCK_CELL) {
             block_in_route = true;
         }
         if (difference > 1) {
@@ -320,7 +324,7 @@ bool repair_route(grid_t *grid, path_t *path) {
     node_t *step = path->steps.head;
     /* get to the start of the repair */
     while (step->next != NULL &&
-           *grid_get(grid, step->next->coords) != BLOCK_CELL) {
+           grid_get(grid, step->next->coords) != BLOCK_CELL) {
         step = step->next;
     }
 
@@ -335,7 +339,7 @@ bool repair_route(grid_t *grid, path_t *path) {
         step = step->next;
     }
     /* skip the problem cells */
-    while (step->next != NULL && *grid_get(grid, step->coords) == BLOCK_CELL) {
+    while (step->next != NULL && grid_get(grid, step->coords) == BLOCK_CELL) {
         step = step->next;
     }
     node_t *tail_path_start = step;
@@ -344,7 +348,7 @@ bool repair_route(grid_t *grid, path_t *path) {
        so we draw only those path segments onto the grid */
     draw_path(grid, tail_path_start);
     /* override the starting cell to be `0` */
-    *grid_get(grid, repair_start->coords) = SEARCH_CELL_MIN;
+    grid_set(grid, repair_start->coords, SEARCH_CELL_MIN);
 
 #if DEBUG
     fprintf(stderr, ", ending somewhere after: [%d, %d]\n",
@@ -368,16 +372,14 @@ bool repair_route(grid_t *grid, path_t *path) {
         point_t right = {.x = p.x + 1, .y = p.y};
         dist = current.distance + 1;
         /* search with priority above, below, left, right */
-        if ((above.y >= 0 &&
-             try_repair_step(grid, above, dist, &repair, &repair_end)) ||
-            (below.y < grid->dim.rows &&
-             try_repair_step(grid, below, dist, &repair, &repair_end)) ||
-            (left.x >= 0 &&
-             try_repair_step(grid, left, dist, &repair, &repair_end)) ||
-            (right.x < grid->dim.cols &&
-             try_repair_step(grid, right, dist, &repair, &repair_end))) {
-            found = true;
-        }
+        found = (above.y >= 0 &&
+                 try_repair_step(grid, above, dist, &repair, &repair_end)) ||
+                (below.y < grid->dim.rows &&
+                 try_repair_step(grid, below, dist, &repair, &repair_end)) ||
+                (left.x >= 0 &&
+                 try_repair_step(grid, left, dist, &repair, &repair_end)) ||
+                (right.x < grid->dim.cols &&
+                 try_repair_step(grid, right, dist, &repair, &repair_end));
     }
 
     if (!found) {
@@ -386,8 +388,8 @@ bool repair_route(grid_t *grid, path_t *path) {
     vec_free(&repair);
 
 #if DEBUG
-    fprintf(stderr, "Found route in %ld steps, ended at: [%d, %d]\n", i,
-            repair_end.y, repair_end.x);
+    fprintf(stderr, "Found route, ended at: [%d, %d]\n", repair_end.y,
+            repair_end.x);
     print_grid(grid);
 #endif
 
@@ -404,7 +406,7 @@ bool repair_route(grid_t *grid, path_t *path) {
 
     point_t tail_point = repair_end;
 
-    assert(*grid_get(grid, repair_start->coords) == SEARCH_CELL_MIN);
+    assert(grid_get(grid, repair_start->coords) == SEARCH_CELL_MIN);
 
     /* gradually add cells until the start of the tail path
        joins up with the start of the repair */
@@ -448,12 +450,12 @@ bool repair_route(grid_t *grid, path_t *path) {
 
 bool try_repair_step(grid_t *grid, point_t point, int distance,
                      vec_deque_t *repair, point_t *repair_end) {
-    int *cell = grid_get(grid, point);
-    if (*cell == EMPTY_CELL) {
+    int cell = grid_get(grid, point);
+    if (cell == EMPTY_CELL) {
         vec_item_t next = {.distance = distance, .coords = point};
-        *grid_get(grid, point) = SEARCH_CELL_MIN + next.distance;
+        grid_set(grid, point, SEARCH_CELL_MIN + next.distance);
         vec_push_back(repair, next);
-    } else if (*cell == ROUTE_CELL) {
+    } else if (cell == ROUTE_CELL) {
         *repair_end = point;
         return true;
     }
@@ -462,7 +464,7 @@ bool try_repair_step(grid_t *grid, point_t point, int distance,
 
 bool try_backtrack(grid_t *grid, point_t *point, int *min_distance,
                    point_t try_point) {
-    int cell = *grid_get(grid, try_point);
+    int cell = grid_get(grid, try_point);
     if (cell >= SEARCH_CELL_MIN) {
         int distance = cell - SEARCH_CELL_MIN;
         if (distance <= *min_distance) {
@@ -480,9 +482,9 @@ void draw_path(grid_t *grid, node_t *start_path) {
     /* if a visited cell is also the initial cell, goal cell, or contains a
        block, then `I`, `G`, or `#`, respectively, should be printed, not `*` */
     while (step != NULL) {
-        cell_t *cell = grid_get(grid, step->coords);
-        if (*cell != BLOCK_CELL) {
-            *cell = ROUTE_CELL;
+        cell_t cell = grid_get(grid, step->coords);
+        if (cell != BLOCK_CELL) {
+            grid_set(grid, step->coords, ROUTE_CELL);
         }
         step = step->next;
     }
@@ -491,8 +493,8 @@ void draw_path(grid_t *grid, node_t *start_path) {
 void print_path_on_grid(grid_t *grid, grid_t *scratch_grid, path_t *path) {
     grid_copy(grid, scratch_grid);
     draw_path(scratch_grid, path->steps.head);
-    *grid_get(scratch_grid, path->start) = INITIAL_CELL;
-    *grid_get(scratch_grid, path->end) = GOAL_CELL;
+    grid_set(scratch_grid, path->start, INITIAL_CELL);
+    grid_set(scratch_grid, path->end, GOAL_CELL);
     print_grid(scratch_grid);
 }
 
@@ -508,7 +510,7 @@ void print_grid(grid_t *grid) {
                 printf("%d", i % 10);
             } else {
                 point_t coords = {.x = i, .y = j};
-                cell_t cell = *grid_get(grid, coords);
+                cell_t cell = grid_get(grid, coords);
                 if (cell == EMPTY_CELL) {
                     printf(" ");
                 } else if (cell == BLOCK_CELL) {
@@ -531,10 +533,21 @@ void print_grid(grid_t *grid) {
 void print_point(point_t point) { printf("[%d,%d]", point.y, point.x); }
 
 void print_results(grid_t *grid, path_t *path, int status, bool initial) {
+    int num_blocks = 0;
+    int i, j;
+    for(i = 0; i < grid->dim.cols; i++) {
+        for(j = 0; j < grid->dim.rows; j++) {
+            point_t point = { .x = i, .y = j };
+            if(grid_get(grid, point) == BLOCK_CELL) {
+                num_blocks++;
+            }
+        }
+    }
+
     if (initial) {
         printf("The grid has %d rows and %d columns.\n", grid->dim.rows,
                grid->dim.cols);
-        printf("The grid has %d block(s).\n", grid->num_blocks);
+        printf("The grid has %d block(s).\n", num_blocks);
         printf("The initial cell in the grid is ");
         print_point(path->start);
         printf(".\nThe goal cell in the grid is ");
@@ -597,10 +610,17 @@ bool parse_point(point_t *point) {
 
 bool same_point(point_t a, point_t b) { return a.x == b.x && a.y == b.y; }
 
-/* allocates space for a grid and sets all cells to EMPTY_CELL */
+/* Initialises an empty grid_t in-place.
+   I initialise all my data structures in-place for this assignment because:
+   (1) the fixed-size 'container' types (grid_t, list_t, vec_deque_t) can be
+       stack-allocated, avoiding unneeded mallocs, whilst the dynamic
+       internals (the node_t's, cell_t array and vec_item_t array) are malloced
+       and freed as usual. This makes it more similar to e.g.: the C++ STL
+   (2) I'm not exposing this code as a standalone library, so the fact you need
+       to know the sizes of the types in order to allocate on the stack isn't
+       a problem. */
 void grid_init(grid_t *grid, dimensions_t dim) {
     grid->dim = dim;
-    grid->num_blocks = 0;
     size_t bytes = sizeof(cell_t) * dim.rows * dim.cols;
     grid->inner = (cell_t *)malloc(bytes);
     assert(grid->inner != NULL);
@@ -608,24 +628,30 @@ void grid_init(grid_t *grid, dimensions_t dim) {
 }
 
 void grid_clear(grid_t *grid) {
-    grid->num_blocks = 0;
     /* 'zeroes' the memory with empty cells */
     size_t bytes = sizeof(cell_t) * grid->dim.rows * grid->dim.cols;
     memset(grid->inner, EMPTY_CELL, bytes);
 }
 
-cell_t *grid_get(grid_t *grid, point_t point) {
+cell_t *grid_get_ptr(grid_t *grid, point_t point) {
     assert(grid->inner != NULL);
     assert(point.x >= 0 && point.x < grid->dim.cols && point.y >= 0 &&
            point.y < grid->dim.rows);
     return &grid->inner[point.y * grid->dim.cols + point.x];
 }
 
-/* NOTE: if 'dest' was already an allocated grid, it must be freed before
-   first otherwise memory will be leaked */
+cell_t grid_get(grid_t *grid, point_t point) {
+    return *grid_get_ptr(grid, point);
+}
+
+void grid_set(grid_t *grid, point_t point, cell_t cell) {
+    *grid_get_ptr(grid, point) = cell;
+}
+
+/* copies the contents of `src` into `dest`. note: both grids must already be
+ * initialised to identical dimensions. */
 void grid_copy(grid_t *src, grid_t *dest) {
     assert(src->dim.cols == dest->dim.cols && src->dim.rows == dest->dim.rows);
-    dest->num_blocks = src->num_blocks;
     size_t bytes = sizeof(cell_t) * src->dim.rows * src->dim.cols;
     memcpy(dest->inner, src->inner, bytes);
 }
@@ -642,6 +668,10 @@ void ll_init(list_t *list) {
 
 bool ll_is_empty(list_t *list) { return list->head == NULL; }
 
+/* Here I return the node_t* which is inserted - this could be seen as
+   'exposing implementation details', however once again this code isn't
+   written as a library, and having access to each node_t directly removes the
+   need to traverse the list at all to search for items. */
 node_t *ll_insert_before(list_t *list, node_t *before, list_item_t coords) {
     node_t *node = (node_t *)malloc(sizeof(*node));
     assert(node != NULL);
