@@ -98,7 +98,7 @@ typedef point_t list_item_t;
    (1) I dislike how void* strips all type information, so you have to hope
        the data is interpreted as the correct type. (compiler won't complain)
    (2) I want to avoid as much pointer indirection as possible, and using
-       a void* means that the list_item_t must be allocated seperately to the
+       a void* means that the list_item_t must be allocated separately to the
        node_t. */
 struct node {
     list_item_t coords;
