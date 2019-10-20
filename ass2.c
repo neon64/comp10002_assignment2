@@ -655,11 +655,20 @@ cell_t *grid_get_ptr(grid_t *grid, point_t point) {
 }
 
 cell_t grid_get(grid_t *grid, point_t point) {
-    return *grid_get_ptr(grid, point);
+    if(point.x >= 0 && point.x < grid->dim.cols && point.y >= 0 &&
+           point.y < grid->dim.rows) {
+        return *grid_get_ptr(grid, point);
+    } else {
+        return EMPTY_CELL;
+    }
 }
 
+/* all out of bounds coordinates are ignored */
 void grid_set(grid_t *grid, point_t point, cell_t cell) {
-    *grid_get_ptr(grid, point) = cell;
+    if(point.x >= 0 && point.x < grid->dim.cols && point.y >= 0 &&
+           point.y < grid->dim.rows) {
+        *grid_get_ptr(grid, point) = cell;
+    }
 }
 
 /* copies the contents of `src` into `dest`. note: both grids must already be
