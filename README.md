@@ -15,3 +15,5 @@ I also implemented a growable ring buffer inspired by Rust's [VecDeque](https://
 which was also not strictly necessary (I initially used a plain array), but was a bit of fun.
 
 Due to the limitations of assignment submission, all the code had to be in a single file, `ass2.c`.
+
+**See also:** my [course notes](https://github.com/neon64/unimelb_lecture_notes/blob/svgs/comp10002/README.md) from the semester.
